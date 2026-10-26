@@ -1,81 +1,198 @@
-# Sistema Hospitalario de Gestión de Citas
+# Sistema Hospitalario de Gestión de Citas con Control de Concurrencia
 
-Implementación del Sprint 2 para consultar disponibilidad, reservar citas de forma segura y cancelarlas. El proyecto separa la aplicación Flet de la API FastAPI; ambas se comunican por HTTP y la API es la única que accede a MySQL.
+Proyecto universitario de **Programación Concurrente** para consultar disponibilidad,
+reservar y cancelar citas médicas. Flet se comunica por HTTP con FastAPI;
+únicamente el backend accede a MySQL.
 
-## Estado comprobado y versiones de la base
+Repositorio: [sistema-hospitalario-concurrencia](https://github.com/derek23-maker/sistema-hospitalario-concurrencia).
 
-La ejecución guiada del 25 de octubre de 2026 utilizó la **base compacta de seis tablas**: `pacientes`, `doctores`, `servicios`, `horarios_doctor`, `ausencias_doctor` y `citas`. El backend detecta esa estructura y conserva también compatibilidad con el esquema anterior de trece tablas. No deben mezclarse sus instaladores ni sus migraciones.
+## Objetivo y alcance
 
-El archivo `db/compacta/CHAT_estructura_exportada.sql` es una copia del DDL y procedimiento exportados de la base compacta. No contiene los datos de prueba. Es una referencia de estructura, no una migración para ejecutar sobre una base existente: contiene `DROP TABLE` y `DROP PROCEDURE`. La inicialización reproducible de datos de esa versión queda pendiente de documentar; no se afirma que los scripts de la base ampliada sirvan para ella.
+Coordinar solicitudes concurrentes sobre la agenda de cada médico y conservar
+resultados consistentes en una base relacional. Incluye consulta, reserva,
+cancelación y conservación del historial. No incluye autenticación,
+administración de catálogos desde la interfaz ni una demostración validada desde
+dos computadoras. La interfaz ejecutada y comprobada es de escritorio.
 
-Se observaron por API diez solicitudes coordinadas al mismo turno: un HTTP 201, nueve HTTP 409 y una sola cita confirmada en MySQL. También se comprobaron consulta desde Flet, cancelación, liberación del turno y nueva reserva conservando el ID histórico. Las pruebas automatizadas de médicos distintos y coordinación de cancelaciones utilizaron un repositorio en memoria. No se repitieron estas pruebas durante la preparación del primer commit.
+## Tecnologías
 
-Las guías anteriores y el documento Word de estudio son antecedentes: algunas descripciones del esquema ampliado no corresponden a la base compacta probada. La documentación universitaria de Fase 2 está en preparación. Grupo, equipo y fecha oficial de entrega están pendientes de confirmar.
+| Tecnología | Función |
+| --- | --- |
+| Python | Lenguaje común de backend, interfaz y pruebas; ejecución comprobada con Python 3.13.5. |
+| FastAPI y Pydantic | Rutas HTTP, contratos JSON, validación y documentación OpenAPI. |
+| Flet | Formularios, consulta de horarios, reserva y cancelación. |
+| HTTPX | Cliente asíncrono de Flet y solicitudes del ensayo concurrente. |
+| MySQL 8 e InnoDB | Persistencia, relaciones, transacciones y procedimiento almacenado. |
+| threading.Lock | Exclusión mutua por médico dentro del proceso del backend. |
+| threading.Barrier y ThreadPoolExecutor | Coordinación de los clientes concurrentes de prueba. |
+| unittest y TestClient | Pruebas de reglas, repositorio simulado y rutas ASGI. |
 
-## Estructura
+Los rangos de dependencias están en [requirements.txt](requirements.txt); no son
+un bloqueo exacto de versiones.
+
+## Arquitectura
 
 ```text
-backend/app/       API, reglas de agenda y acceso a MySQL
-frontend/          cliente de escritorio/móvil en Flet
-db/                ajuste recomendado para el procedimiento almacenado
-backend/tests/     pruebas sin una instancia de MySQL
+Flet --- HTTP / JSON (HTTPX) ---> Rutas FastAPI y contratos Pydantic
+                                      |
+                                 AgendaService
+                             mutex por médico/proceso
+                                      |
+                               AgendaRepository
+                               pool de conexiones
+                                      |
+                                MySQL InnoDB
+                         procedimiento y transacciones
 ```
 
-## Antes de ejecutar
+La consulta de disponibilidad no toma el mutex. Reserva y cancelación comparten
+el candado del médico. Consultar un turno libre no garantiza que siga libre al
+confirmarlo; la operación vuelve a validar el estado. El candado no se comparte
+entre procesos y no sustituye las transacciones. Consulte
+[Implementación de concurrencia](docs/concurrencia.md).
 
-1. Cree y active un entorno virtual de Python 3.11 o superior.
-2. Instale `pip install -r requirements.txt`.
-3. Copie `.env.example` a `.env` y defina las credenciales de una cuenta MySQL con acceso limitado a `sistema_hospitalario`.
-4. Si utiliza la **base compacta existente ya comprobada**, conserve sus tablas y procedimiento. No ejecute `003_mutex_concurrencia.sql` ni los instaladores de trece tablas. Si utiliza específicamente el **esquema ampliado anterior**, consulte las advertencias de esos scripts: `003` es su migración y `01` reconstruye la base, borrando datos. El antiguo `001` es legado y no debe reinstalarse.
+## Estructura del proyecto
+
+```text
+.env.example                    Plantilla sin contraseña real
+.gitignore                      Exclusión de secretos y artefactos
+README.md                       Presentación, instalación y ejecución
+requirements.txt                Dependencias
+run_backend.py                  Inicio de Uvicorn en 127.0.0.1:8000
+PREPARAR_PROYECTO.bat            Preparación del entorno .venv
+INICIAR_BACKEND.bat              Inicio del backend con .venv
+INICIAR_FLET.bat                 Inicio de Flet con .venv
+Abrir_IDLE_del_proyecto.bat      Apertura de IDLE con .venv
+backend/
+  app/
+    api/                        Dependencias y rutas
+    core/                       Configuración
+    domain/                     Contratos, intervalos y resultados
+    infrastructure/             Pool y conexiones MySQL
+    repositories/               Consultas SQL y transacciones
+    services/                   Reglas y mutex por médico
+    main.py                     Construcción de FastAPI
+  tests/                        Pruebas unitarias, ASGI e integración optativa
+frontend/                       Interfaz Flet y cliente HTTP
+db/
+  compacta/                     Exportado del modelo de seis tablas
+  *.sql                         Instaladores y migraciones del modelo ampliado
+scripts/
+  probar_api_concurrente.py      Diez solicitudes contra una API activa
+docs/
+  concurrencia.md               Mutex, barrera, transacciones y límites
+  pruebas.md                    Verificación y resultados técnicos
+```
+
+## Base de datos: modelos que no deben mezclarse
+
+La demostración comprobada utilizó **seis tablas** de sistema_hospitalario:
+pacientes, doctores, servicios, horarios_doctor, ausencias_doctor y citas.
+El backend detecta esa estructura y adapta las consultas. La referencia es
+[el exportado compacto](db/compacta/CHAT_estructura_exportada.sql), que contiene
+DDL y procedimiento, pero **no los datos de prueba**. Incluye DROP TABLE y
+DROP PROCEDURE: no debe ejecutarse sobre una base existente para iniciar la API.
+La inicialización reproducible de datos de una instalación compacta vacía queda
+pendiente; esta ruta no se presenta como instalación completa desde cero.
+
+Los SQL de la raíz de db/ corresponden al modelo **ampliado de trece tablas**:
+
+- 01_INSTALAR_BASE_CORREGIDA.sql reconstruye la base y **borra sus datos**.
+- 02_CARGAR_DATOS_DEMO.sql proporciona datos de ejemplo del modelo ampliado.
+- 003_mutex_concurrencia.sql es una migración de ese modelo, no del compacto.
+- 001_hardening_sp_reservar_cita.sql y 002_datos_demo.sql son antecedentes del
+  esquema ampliado; 001 es legado y no debe reinstalarse después de 003.
+
+Se conservan todos los SQL sin ejecutarlos durante esta limpieza. Antes de usarlos
+se debe identificar el modelo, revisar su contenido y respaldar los datos.
+La base compacta no contiene la llave única de turno con horario_ocupado
+que sí incorpora la versión ampliada corregida.
+
+## Instalación en Windows
+
+Requisitos: Python 3.11 o superior, MySQL 8 activo y una base compatible preparada.
+Utilice preferentemente una cuenta MySQL de privilegios limitados; no comparta
+sus credenciales con los clientes de la interfaz.
+
+Desde PowerShell, en la raíz del repositorio:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
+```
+
+Complete localmente DB_HOST, DB_PORT, DB_NAME, DB_USER y DB_PASSWORD. No publique
+.env. Los demás parámetros están documentados en .env.example. No copie entornos
+virtuales entre computadoras ni ejecute instaladores SQL para arrancar una base
+ya preparada.
+
+PREPARAR_PROYECTO.bat automatiza la creación de .venv, las dependencias y la copia
+de la plantilla si .env no existe. No instala MySQL ni crea tablas.
+La ejecución previamente comprobada utilizó .venv-tests; si conserva ese entorno,
+sustituya .venv por .venv-tests en los comandos. Los .bat apuntan a .venv.
 
 ## Ejecución
 
-En una terminal, desde la raíz del proyecto:
+Primera terminal desde la raíz:
 
 ```powershell
-.\.venv-tests\Scripts\python.exe run_backend.py
+.\.venv\Scripts\python.exe run_backend.py
 ```
 
-En otra terminal:
+Segunda terminal, manteniendo el backend abierto:
 
 ```powershell
-$env:HOSPITAL_API_BASE_URL = "http://127.0.0.1:8000"
-.\.venv-tests\Scripts\python.exe frontend\app.py
+$env:HOSPITAL_API_BASE_URL = 'http://127.0.0.1:8000'
+.\.venv\Scripts\python.exe frontend\app.py
 ```
 
-La ejecución comprobada en esta PC usó `.venv-tests`. En una nueva instalación puede crear ese entorno con `python -m venv .venv-tests` e instalar dependencias con `.\.venv-tests\Scripts\python.exe -m pip install -r requirements.txt`. No copie entornos virtuales de otra computadora. Los `.bat` existentes usan `.venv`, por lo que deben ejecutarse solo si ese otro entorno está preparado.
+Con .venv preparado, también pueden usarse INICIAR_BACKEND.bat e INICIAR_FLET.bat.
+Abrir_IDLE_del_proyecto.bat abre IDLE con ese intérprete para ejecutar cada
+programa por separado. Ningún lanzador reconstruye la base. run_backend.py
+escucha solo en la interfaz local, con un proceso y sin recarga automática.
 
-Para ejecutar la API desde IDLE, abra `run_backend.py` con el intérprete que tiene
-instaladas las dependencias y presione F5. Mantenga esa ventana abierta y ejecute
-`frontend/app.py` con F5 desde una segunda ventana de IDLE.
+Documentación interactiva: [OpenAPI /docs](http://127.0.0.1:8000/docs).
 
-En Windows, `Abrir_IDLE_del_proyecto.bat` abre una instancia de IDLE con el
-intérprete `.venv` del proyecto. Ábralo dos veces para usar una ventana para la
-API y otra para Flet.
-
-La especificación interactiva queda disponible en `http://127.0.0.1:8000/docs`.
-
-## Contrato de la API
-
-| Operación | Método y ruta | Resultado relevante |
+| Operación | Método y ruta | Resultado |
 | --- | --- | --- |
-| Consultar agenda | `GET /horarios/{id_doctor}?fecha=AAAA-MM-DD&id_servicio=ID` | Franjas disponibles u ocupadas para la duración del servicio. |
-| Reservar | `POST /citas/reservar` | `201` si se confirma; `409` si otra transacción ganó el horario. |
-| Cancelar | `PATCH /citas/cancelar/{id_cita}` | Marca la cita como cancelada de forma atómica. |
+| Consultar | GET /horarios/{id_doctor}?fecha=AAAA-MM-DD&id_servicio=ID | 200 con franjas para la duración del servicio. |
+| Reservar | POST /citas/reservar | 201 al confirmar; 409 ante conflicto. |
+| Cancelar | PATCH /citas/cancelar/{id_cita} | 200 al cancelar; 409 si ya no es cancelable. |
+| Estado | GET /health | Disponibilidad HTTP, no comprobación continua de MySQL. |
 
-No se incluyó autenticación porque el Sprint 2 aún no define el mecanismo de login ni cómo se obtiene el paciente autenticado. Por ahora los identificadores se reciben explícitamente; al añadir JWT, `id_paciente` debe obtenerse del token y no del cuerpo de la petición.
+## Pruebas y resultados
 
-## Concurrencia
+Para comprobar lógica y coordinación sin MySQL, **no defina**
+HOSPITAL_TEST_DB_PASSWORD en esa terminal. Las tres integraciones optativas se
+omiten cuando esa variable no existe; habilitarlas crea y elimina una base temporal.
 
-`backend/app/services/doctor_mutex.py` mantiene un registro compartido por proceso de `threading.Lock`, uno por médico. `AgendaService.reserve` adquiere ese mutex antes de validar y llamar al procedimiento. `cancel` utiliza el mismo mutex. Dos peticiones del mismo médico se ordenan; las de médicos distintos tienen candados diferentes. La consulta de horarios no adquiere estos mutex.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s backend\tests -v
+```
 
-El pequeño candado del diccionario solo protege la creación y el conteo de referencias: nunca cubre SQL ni espera otro mutex. Se cuentan propietarios y esperadores para poder retirar entradas sin crear dos candados simultáneos para el mismo médico. `finally` libera el mutex incluso cuando hay excepciones. Los registros `mutex espera`, `mutex adquirido` y `mutex liberado` muestran PID, identificador del hilo, médico y operación; la adquisición incluye milisegundos de espera. `espera` anuncia el intento de adquirir, aunque el candado esté libre.
+Las pruebas ASGI sustituyen MySQL por un repositorio en memoria; no equivalen a
+una ejecución distribuida. El procedimiento para diez clientes HTTP, sus
+precondiciones y consultas de persistencia están en
+[Pruebas y resultados](docs/pruebas.md).
 
-El recurso compartido es la agenda de citas del médico. La condición de carrera es consultar un turno libre y confirmarlo mientras otra solicitud intenta hacer lo mismo. El mutex ordena las operaciones **solo dentro de un proceso**; no garantiza disponibilidad, no promete orden FIFO y no comparte memoria entre workers. Para demostrarlo use un worker. MySQL sigue decidiendo si el turno está libre y devuelve conflicto 409 a los intentos que pierden.
+La ejecución funcional documentada obtuvo una reserva HTTP 201 y nueve conflictos
+409 al intentar el mismo turno, con una sola cita confirmada en MySQL. Se
+comprobaron cancelación, liberación y nueva reserva con otro ID, conservando el
+historial. No se presentan estos resultados como prueba de carga sostenida ni de
+protección aislada entre procesos.
 
-`sp_reservar_cita` mantiene START TRANSACTION, COMMIT, ROLLBACK y SELECT FOR UPDATE sobre el médico. El exportado compacto usa `SELECT COUNT(*) ... FROM doctores ... FOR UPDATE`; el SQL ampliado usa una lectura directa de su ID. No se ejecutó una prueba aislada del candado MySQL entre procesos durante la demostración guiada. Cancelación toma una transacción y bloquea primero doctor, después cita. Los timeouts, duplicados y deadlocks también se traducen a 409. Cualquier futuro flujo que cambie la agenda, jornadas o ausencias debe respetar el mismo protocolo de bloqueo del doctor.
+## Seguridad y limitaciones
 
-**Solo el esquema ampliado** incorpora la llave única con columna generada `horario_ocupado`. La base compacta exportada no tiene esa restricción: sus estados son `confirmada` y `cancelada`, usa `cancelada_por`/`cancelada_en` y conserva la duración en cada cita. En ella la protección de reservas pasa por el procedimiento y los mutex del servicio. La nueva reserva INSERTA con un ID nuevo, conservando cancelaciones anteriores, tal como se comprobó con las citas 1, 2 y 3. El frontend y los contratos HTTP anteriores se conservan.
+.env, claves privadas, entornos virtuales, cachés y materiales personales de
+preparación quedan excluidos. .env.example contiene valores de ejemplo.
+Revise los cambios antes de cada commit.
 
-Consulte [GUIA_MUTEX.md](GUIA_MUTEX.md) para reproducir las pruebas y la demostración con diez hilos.
+Los identificadores se capturan manualmente y no existe autenticación. El mutex
+es local a un proceso y no promete orden FIFO. Al refrescar disponibilidad, Flet
+puede reemplazar el mensaje de confirmación; el límite del motivo también difiere
+entre contrato y procedimiento compacto. Estos aspectos y la inicialización
+compacta pendiente requieren revisión antes de un uso fuera del entorno académico.
+Estas instrucciones no publican el servicio en internet.
 

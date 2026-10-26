@@ -16,6 +16,11 @@ SISTEMA_HOSPITALARIO_SPRINT_2/
 entrega_fase2/
 qa_guia_defensa/
 qa_guia_defensa_word/
+# Materiales personales de preparación: copias locales fuera del repositorio.
+/Guia_para_defender_Sistema_Hospitalario*.docx
+/crear_guia_defensa.py
+/GUIA_DEMO_MANANA.md
+/GUIA_MUTEX.md
 ~$*
 # Archivos de credenciales y claves locales; nunca se versionan.
 *.pem
