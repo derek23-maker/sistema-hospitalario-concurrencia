@@ -1,0 +1,28 @@
+.env
+.env.*
+!.env.example
+.venv/
+.venv-tests/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+dist/
+build/
+# Paquetes antiguos, salidas de documentación y archivos temporales locales.
+SISTEMA_HOSPITALARIO_SPRINT_2/
+*.zip
+entrega_fase2/
+qa_guia_defensa/
+qa_guia_defensa_word/
+~$*
+# Archivos de credenciales y claves locales; nunca se versionan.
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+.mysql_history
+
